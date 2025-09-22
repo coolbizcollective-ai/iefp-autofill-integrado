@@ -284,4 +284,52 @@ else:
     ], columns=["tipo","descricao","valor"]), num_rows="dynamic", key="inv_bp")
 
     try:
-        tabs_fin =
+        try:
+        tabs_fin = calc_p2(anos, assum, vendas_df, pessoal_df, investimento_df)
+    except Exception as e:
+        import traceback
+        st.error("Erro nos cálculos da Parte 2.")
+        st.code(traceback.format_exc())
+        st.stop()
+
+    st.markdown("---")
+    st.subheader("Resultados")
+    for nome, df in tabs_fin.items():
+        st.markdown(f"**{nome.upper()}**")
+        st.dataframe(df, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Exportar DOCX + Excel")
+
+    # Excel
+    xlsx_buf = io.BytesIO()
+    with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as w:
+        for nome, df in tabs_fin.items():
+            df.to_excel(w, index=False, sheet_name=nome[:31])
+    xlsx_buf.seek(0)
+
+    # DOCX
+    docx_buf = io.BytesIO()
+    tmp_path = Path("tmp_p2.docx")
+    try:
+        build_docx_p2({}, tabs_fin, {k.replace("ta_",""): v for k, v in st.session_state.items() if k.startswith("ta_sec_")}, tmp_path)
+        docx_buf.write(tmp_path.read_bytes())
+        docx_buf.seek(0)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    colD, colE = st.columns(2)
+    with colD:
+        st.download_button(
+            "⬇️ DOCX (Parte 2)",
+            data=docx_buf,
+            file_name="parte2_plano_negocio.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    with colE:
+        st.download_button(
+            "⬇️ Excel (Parte 2)",
+            data=xlsx_buf,
+            file_name="parte2_mapas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
