@@ -193,25 +193,32 @@ else:
 
     usar_ia_p2 = st.checkbox("Ativar IA (botões por secção)", value=False)
     textos = {}
-    for titulo, limite, instr in sec_list:
-        colT, colB = st.columns([3,1])
-        with colT:
-            val = st.text_area(titulo, height=140, key=f"ta_{titulo}")
-        with colB:
-            if st.button("Gerar com IA", key=f"btn_{titulo}"):
-                if usar_ia_p2 and ia_ok_bp():
-                    try:
-                        txt = ia_text_bp(titulo, instr, {"tema": titulo})
-                        textos[titulo] = cortar(txt, limite)
-                        st.session_state[f"ta_{titulo}"] = textos[titulo]
-                        val = textos[titulo]
-                    except Exception as e:
-                        import traceback
-                        st.error("Erro ao gerar texto com IA.")
-                        st.code(traceback.format_exc())
-                else:
-                    st.warning("Ativa IA e define OPENAI_API_KEY nos Secrets.")
-        textos[titulo] = st.session_state.get(f"ta_{titulo}", "")
+    for idx, (titulo, limite, instr) in enumerate(sec_list):
+    key_area = f"ta_sec_{idx}"     # chave sem espaços
+    key_btn  = f"btn_sec_{idx}"
+
+    colT, colB = st.columns([3, 1])
+    with colB:
+        if st.button("Gerar com IA", key=key_btn):
+            if usar_ia_p2 and ia_ok_bp():
+                try:
+                    txt = ia_text_bp(titulo, instr, {"tema": titulo})
+                    txt = cortar(txt, limite)
+                    # Atualiza o valor do text_area e força novo ciclo
+                    st.session_state[key_area] = txt
+                    st.rerun()
+                except Exception as e:
+                    import traceback
+                    st.error("Erro ao gerar texto com IA.")
+                    st.code(traceback.format_exc())
+            else:
+                st.warning("Ativa IA e define OPENAI_API_KEY nos Secrets.")
+
+    with colT:
+        val = st.session_state.get(key_area, "")
+        st.text_area(titulo, value=val, height=140, key=key_area)
+
+    textos[titulo] = st.session_state.get(key_area, "")
 
     st.markdown("---")
     st.subheader("Pressupostos (alimentam as tabelas)")
