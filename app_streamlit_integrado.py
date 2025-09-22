@@ -284,7 +284,6 @@ else:
     ], columns=["tipo","descricao","valor"]), num_rows="dynamic", key="inv_bp")
 
     try:
-        try:
         tabs_fin = calc_p2(anos, assum, vendas_df, pessoal_df, investimento_df)
     except Exception as e:
         import traceback
@@ -312,7 +311,15 @@ else:
     docx_buf = io.BytesIO()
     tmp_path = Path("tmp_p2.docx")
     try:
-        build_docx_p2({}, tabs_fin, {k.replace("ta_",""): v for k, v in st.session_state.items() if k.startswith("ta_sec_")}, tmp_path)
+        # Apenas as secções de texto que existirem no session_state
+        textos_sec = {k.replace("ta_sec_", ""): v for k, v in st.session_state.items() if k.startswith("ta_sec_")}
+        # Constrói um dicionário com títulos reais (mantemos a ordem de sec_list)
+        textos_map = {}
+        for idx, (titulo, _, _) in enumerate(sec_list):
+            key = str(idx)
+            if key in textos_sec:
+                textos_map[titulo] = textos_sec[key]
+        build_docx_p2({}, tabs_fin, textos_map, tmp_path)
         docx_buf.write(tmp_path.read_bytes())
         docx_buf.seek(0)
     finally:
