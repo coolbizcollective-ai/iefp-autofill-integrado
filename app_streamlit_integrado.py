@@ -18,6 +18,7 @@ from autofill_core_bp import (
     cortar,
 )
 
+# ---------------- Configuração ---------------- #
 st.set_page_config(page_title="IEFP — App Integrada", page_icon="🧩", layout="wide")
 st.sidebar.title("🧩 IEFP — App Integrada")
 page = st.sidebar.radio("Escolhe a área", ["Parte 1 — Formulário IEFP", "Parte 2 — Plano de Negócio"])
@@ -159,13 +160,14 @@ if page.startswith("Parte 1"):
         with colE:
             st.download_button("⬇️ Excel (Parte 1)", data=xlsx_buf, file_name="parte1_mapas.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 # ---------------- Parte 2 ---------------- #
 else:
     st.title("📘 Parte 2 — Plano de Negócio")
+
     sec_list = [
         ("1. Apresentação da empresa", 800, "Apresenta a empresa e o âmbito de atividade."),
         ("1.1. Historial e apresentação do promotor", 600, "Experiência, formação, resultados relevantes."),
-        ("1.2. Historial e apresentação do promotor (equipa)", 600, "Restantes promotores/equipa e complementaridade."),
         ("1.3. Missão, visão e valores da empresa", 500, "Missão, visão a 3-5 anos e valores orientadores."),
         ("1.4. Objetivos do projeto", 800, "Metas SMART, prazos e indicadores."),
         ("1.5. O projeto, o serviço e a ideia", 900, "Descrição do serviço, proposta de valor e benefício para o cliente."),
@@ -192,33 +194,33 @@ else:
     ]
 
     usar_ia_p2 = st.checkbox("Ativar IA (botões por secção)", value=False)
+
     textos = {}
     for idx, (titulo, limite, instr) in enumerate(sec_list):
-    key_area = f"ta_sec_{idx}"     # chave sem espaços
-    key_btn  = f"btn_sec_{idx}"
+        key_area = f"ta_sec_{idx}"
+        key_btn  = f"btn_sec_{idx}"
 
-    colT, colB = st.columns([3, 1])
-    with colB:
-        if st.button("Gerar com IA", key=key_btn):
-            if usar_ia_p2 and ia_ok_bp():
-                try:
-                    txt = ia_text_bp(titulo, instr, {"tema": titulo})
-                    txt = cortar(txt, limite)
-                    # Atualiza o valor do text_area e força novo ciclo
-                    st.session_state[key_area] = txt
-                    st.rerun()
-                except Exception as e:
-                    import traceback
-                    st.error("Erro ao gerar texto com IA.")
-                    st.code(traceback.format_exc())
-            else:
-                st.warning("Ativa IA e define OPENAI_API_KEY nos Secrets.")
+        colT, colB = st.columns([3, 1])
+        with colB:
+            if st.button("Gerar com IA", key=key_btn):
+                if usar_ia_p2 and ia_ok_bp():
+                    try:
+                        txt = ia_text_bp(titulo, instr, {"tema": titulo})
+                        txt = cortar(txt, limite)
+                        st.session_state[key_area] = txt
+                        st.rerun()
+                    except Exception as e:
+                        import traceback
+                        st.error("Erro ao gerar texto com IA.")
+                        st.code(traceback.format_exc())
+                else:
+                    st.warning("Ativa IA e define OPENAI_API_KEY nos Secrets.")
 
-    with colT:
-        val = st.session_state.get(key_area, "")
-        st.text_area(titulo, value=val, height=140, key=key_area)
+        with colT:
+            val = st.session_state.get(key_area, "")
+            st.text_area(titulo, value=val, height=140, key=key_area)
 
-    textos[titulo] = st.session_state.get(key_area, "")
+        textos[titulo] = st.session_state.get(key_area, "")
 
     st.markdown("---")
     st.subheader("Pressupostos (alimentam as tabelas)")
@@ -282,40 +284,4 @@ else:
     ], columns=["tipo","descricao","valor"]), num_rows="dynamic", key="inv_bp")
 
     try:
-        tabs_fin = calc_p2(anos, assum, vendas_df, pessoal_df, investimento_df)
-    except Exception as e:
-        import traceback
-        st.error("Erro nos cálculos da Parte 2.")
-        st.code(traceback.format_exc())
-        st.stop()
-
-    st.markdown("---")
-    st.subheader("Resultados")
-    for nome, df in tabs_fin.items():
-        st.markdown(f"**{nome.upper()}**")
-        st.dataframe(df, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("Exportar DOCX + Excel")
-    xlsx_buf = io.BytesIO()
-    with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as w:
-        for nome, df in tabs_fin.items():
-            df.to_excel(w, index=False, sheet_name=nome[:31])
-    xlsx_buf.seek(0)
-
-    docx_buf = io.BytesIO()
-    tmp_path = Path("tmp_p2.docx")
-    try:
-        build_docx_p2({}, tabs_fin, {k.replace("ta_",""):v for k,v in st.session_state.items() if k.startswith("ta_")}, tmp_path)
-        docx_buf.write(tmp_path.read_bytes()); docx_buf.seek(0)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-    colD, colE = st.columns(2)
-    with colD:
-        st.download_button("⬇️ DOCX (Parte 2)", data=docx_buf, file_name="parte2_plano_negocio.docx",
-                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    with colE:
-        st.download_button("⬇️ Excel (Parte 2)", data=xlsx_buf, file_name="parte2_mapas.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
+        tabs_fin =
