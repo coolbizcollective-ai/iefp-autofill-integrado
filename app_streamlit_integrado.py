@@ -1,59 +1,77 @@
-# =========================
-#  🔧 DEPENDÊNCIAS
-# =========================
+import os
 import io
+from typing import List, Dict, Any
 import streamlit as st
 import pandas as pd
-from typing import List, Dict, Any
 
 # =========================
 #  ⚙️ CONFIG GERAL
 # =========================
-AI_MODEL = "gpt-4o-mini"   # ajusta ao teu provider/modelo
-LIMITE_CONTEXTO = 14_000   # limite de caracteres agregados
+AI_MODEL = os.getenv("CBIZ_MODEL", "gpt-4o-mini")
+LIMITE_CONTEXTO = 14_000
 
 # =========================
-#  🤖 CHAMADA IA (PROMPT BASE UNIFICADO)
+#  🔐 OPENAI CLIENT (Chat Completions estável)
 # =========================
+def _get_api_key() -> str:
+    try:
+        if "OPENAI_API_KEY" in st.secrets:
+            return st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass
+    return os.getenv("OPENAI_API_KEY", "")
+
+def _get_openai_client():
+    key = _get_api_key()
+    if not key:
+        return None, "OPENAI_API_KEY não definida em st.secrets ou variável de ambiente."
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=key), ""
+    except Exception as e:
+        return None, f"Biblioteca openai não disponível. Faz: pip install openai  [{e}]"
+
 def chamar_ia_base(user: str, extra_system: str = "") -> str:
     """
-    Wrapper para chamadas à IA com prompt base unificado.
-    Substitui o corpo pelo teu conector real (OpenAI/Azure/etc.)
+    Usa apenas Chat Completions (messages) para evitar erros de 'fluxo de mensagens'.
     """
+    client, err = _get_openai_client()
+    if not client:
+        return f"[IA inativa] {err}"
+
     system = (
         "És um assistente que escreve conteúdo técnico e claro para formulários de projetos de investimento "
-        "e candidaturas a programas de financiamento. "
-        "Utilizas sempre fontes oficiais e fidedignas de informação, atualizadas.\n"
+        "e candidaturas a programas de financiamento. Utilizas sempre fontes oficiais e fidedignas de informação, atualizadas.\n"
         "Responde em Português de Portugal, estruturado, conciso e acionável.\n"
         "Se houver dados no contexto, usa-os rigorosamente; caso faltem, assume comedidamente e sinaliza suposições.\n"
     )
     if extra_system:
         system += "\n" + extra_system
 
-    # 🔁 LIGAÇÃO REAL À IA — exemplo (pseudocódigo):
-    # from openai import OpenAI
-    # client = OpenAI()
-    # resp = client.chat.completions.create(
-    #     model=AI_MODEL,
-    #     messages=[{"role": "system", "content": system},
-    #               {"role": "user", "content": user}],
-    #     temperature=0.4,
-    # )
-    # return resp.choices[0].message.content.strip()
+    try:
+        resp = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.4,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        return f"[ERRO AO CHAMAR OPENAI (chat.completions)]: {e}"
 
-    return "[SUBSTITUI PELO TEU CONECTOR DA IA]"  # placeholder visível
-
-def chamar_ia_para_campo(label: str, instrucao: str, contexto: str, estilo: str = "Português de Portugal") -> str:
+def chamar_ia_para_campo(label: str, instrucao: str, contexto: str) -> str:
     user = (
         f"# Tarefa\nPreenche o campo: **{label}**.\n\n"
         f"# Instrução específica\n{instrucao}\n\n"
-        f"# Estilo\n- {estilo}\n- Tom profissional, direto; usar listas quando útil.\n\n"
+        f"# Estilo\n- Português de Portugal\n- Tom profissional, direto; usar listas quando útil.\n\n"
         f"# Contexto\n{contexto}\n"
     )
     return chamar_ia_base(user)
 
 # =========================
-#  🧰 HELPERS
+#  🧰 HELPERS (uploads/extração)
 # =========================
 def truncate(txt: str, limit: int = LIMITE_CONTEXTO) -> str:
     return txt if len(txt) <= limit else txt[:limit] + "\n\n[Contexto truncado…]"
@@ -89,9 +107,9 @@ def extract_text_from_xlsx(file_bytes: bytes) -> str:
     except Exception as e:
         return f"[ERRO a ler XLSX: {e}]"
 
-def extract_text_from_upload(uploaded_files) -> str:
+def extract_text_from_upload(files) -> str:
     texts = []
-    for uf in uploaded_files or []:
+    for uf in files or []:
         name = uf.name.lower()
         content = uf.read()
         if name.endswith(".pdf"):
@@ -108,12 +126,8 @@ def extract_text_from_upload(uploaded_files) -> str:
         texts.append(f"\n---\nFicheiro: {uf.name}\n{txt}")
     return "\n".join(texts).strip()
 
-# =========================
-#  🧱 CONTEXTO (APP + DOCUMENTOS)
-# =========================
 def build_context_from_fields(state: Dict[str, Any]) -> str:
-    # Ajusta as chaves à tua Parte 1 (mantém estas para exemplo):
-    campos_basicos = {
+    campos = {
         "Empresa": state.get("empresa_nome", ""),
         "Promotor": state.get("promotor_nome", ""),
         "Setor": state.get("setor", ""),
@@ -122,54 +136,23 @@ def build_context_from_fields(state: Dict[str, Any]) -> str:
         "Proposta de valor": state.get("proposta_valor", ""),
         "Resumo": state.get("resumo_geral", ""),
     }
-    linhas = [f"- {k}: {v}" for k, v in campos_basicos.items() if str(v).strip()]
-    if not linhas:
-        return ""
-    return "Contexto já preenchido na app:\n" + "\n".join(linhas)
+    linhas = [f"- {k}: {v}" for k, v in campos.items() if str(v).strip()]
+    return "Contexto (campos base):\n" + "\n".join(linhas) if linhas else ""
 
 def build_context(modo_fontes: str, session: Dict[str, Any], uploaded_files) -> str:
     partes = []
     if modo_fontes in ("Campos anteriores", "Ambos"):
         app_ctx = build_context_from_fields(session)
-        if app_ctx:
-            partes.append(app_ctx)
+        if app_ctx: partes.append(app_ctx)
     if modo_fontes in ("Documentos", "Ambos"):
         doc_txt = extract_text_from_upload(uploaded_files)
-        if doc_txt:
-            partes.append("Contexto extraído de documentos:\n" + doc_txt)
-    ctx = "\n\n".join([p for p in partes if p and p.strip()])
+        if doc_txt: partes.append("Contexto (documentos):\n" + doc_txt)
+    ctx = "\n\n".join(partes)
     return truncate(ctx, LIMITE_CONTEXTO)
 
 # =========================
-#  ✍️ AÇÕES DE GERAÇÃO / EXPANSÃO
+#  🧩 CAMPOS
 # =========================
-def gerar_para_campo(key_area: str, label: str, instrucao: str, modo_fontes_key: str, uploads_key: str):
-    uploaded_files = st.session_state.get(uploads_key)
-    contexto = build_context(
-        modo_fontes=st.session_state.get(modo_fontes_key, "Campos anteriores"),
-        session=st.session_state,
-        uploaded_files=uploaded_files
-    )
-    texto_ia = chamar_ia_para_campo(label=label, instrucao=instrucao, contexto=contexto)
-    st.session_state[key_area] = texto_ia
-    st.rerun()
-
-def expandir_campo(key_area: str, label: str, instrucao: str, modo_fontes_key: str, uploads_key: str):
-    uploaded_files = st.session_state.get(uploads_key)
-    contexto = build_context(
-        modo_fontes=st.session_state.get(modo_fontes_key, "Campos anteriores"),
-        session=st.session_state,
-        uploaded_files=uploaded_files
-    )
-    novo = chamar_ia_para_campo(label=label, instrucao=instrucao, contexto=contexto)
-    atual = st.session_state.get(key_area, "")
-    st.session_state[key_area] = (atual + ("\n\n" if atual else "") + novo).strip()
-    st.rerun()
-
-# =========================
-#  🧩 DEFINIÇÃO DOS CAMPOS
-# =========================
-# PARTE 1 — exemplo de campos base (ajusta aos teus reais)
 FIELDS_PART1: List[Dict[str, str]] = [
     {"label": "Nome da empresa", "key": "empresa_nome", "prompt": "Indica o nome oficial da entidade promotora."},
     {"label": "Nome do promotor", "key": "promotor_nome", "prompt": "Identifica o(s) promotor(es) do projeto e função."},
@@ -180,7 +163,6 @@ FIELDS_PART1: List[Dict[str, str]] = [
     {"label": "Resumo geral do projeto", "key": "resumo_geral", "prompt": "Apresenta um resumo executivo claro do projeto."},
 ]
 
-# PARTE 2 — lista que me enviaste (com instruções curtas por campo)
 FIELDS_PART2: List[Dict[str, str]] = [
     {"label": "1.1. Historial e apresentação do promotor", "key": "historial", "prompt": "Elabora o historial e a apresentação do promotor, incluindo experiência e resultados relevantes."},
     {"label": "1.3. Missão, visão e valores da empresa", "key": "missao", "prompt": "Define missão, visão e valores, alinhados com o projeto e o setor."},
@@ -209,6 +191,32 @@ FIELDS_PART2: List[Dict[str, str]] = [
 ]
 
 # =========================
+#  🧱 AÇÕES IA
+# =========================
+def gerar_para_campo(key_area: str, label: str, instrucao: str, modo_fontes_key: str, uploads_key: str):
+    uploaded_files = st.session_state.get(uploads_key, [])
+    contexto = build_context(
+        modo_fontes=st.session_state.get(modo_fontes_key, "Campos anteriores"),
+        session=st.session_state,
+        uploaded_files=uploaded_files
+    )
+    texto_ia = chamar_ia_para_campo(label=label, instrucao=instrucao, contexto=contexto)
+    st.session_state[key_area] = texto_ia
+    st.rerun()
+
+def expandir_campo(key_area: str, label: str, instrucao: str, modo_fontes_key: str, uploads_key: str):
+    uploaded_files = st.session_state.get(uploads_key, [])
+    contexto = build_context(
+        modo_fontes=st.session_state.get(modo_fontes_key, "Campos anteriores"),
+        session=st.session_state,
+        uploaded_files=uploaded_files
+    )
+    novo = chamar_ia_para_campo(label=label, instrucao=instrucao, contexto=contexto)
+    atual = st.session_state.get(key_area, "")
+    st.session_state[key_area] = (atual + ("\n\n" if atual else "") + novo).strip()
+    st.rerun()
+
+# =========================
 #  🧱 RENDERIZADORES
 # =========================
 def render_field_block(field: Dict[str, str], uploads_key: str, default_mode: str = "Campos anteriores"):
@@ -224,14 +232,12 @@ def render_field_block(field: Dict[str, str], uploads_key: str, default_mode: st
             "Fonte de dados",
             ["Campos anteriores", "Documentos", "Ambos"],
             key=modo_key,
-            index=["Campos anteriores", "Documentos", "Ambos"].index(
-                st.session_state.get(modo_key, default_mode)
-            ),
+            index=["Campos anteriores", "Documentos", "Ambos"].index(st.session_state.get(modo_key, default_mode)),
             label_visibility="collapsed",
         )
     with c3:
-        bcol1, bcol2 = st.columns(2)
-        with bcol1:
+        b1, b2 = st.columns(2)
+        with b1:
             st.button(
                 "Gerar com IA",
                 key=f"btn_{key_area}_gerar",
@@ -245,7 +251,7 @@ def render_field_block(field: Dict[str, str], uploads_key: str, default_mode: st
                 },
                 use_container_width=True,
             )
-        with bcol2:
+        with b2:
             st.button(
                 "Expandir com IA",
                 key=f"btn_{key_area}_expandir",
@@ -260,12 +266,7 @@ def render_field_block(field: Dict[str, str], uploads_key: str, default_mode: st
                 use_container_width=True,
             )
 
-    st.text_area(
-        label="",
-        key=key_area,
-        height=220,
-        placeholder=f"Escreve ou clica em Gerar/Expandir com IA – {label}",
-    )
+    st.text_area("", key=key_area, height=220, placeholder=f"Escreve ou clica em Gerar/Expandir — {label}")
     st.markdown("---")
 
 # =========================
@@ -274,23 +275,28 @@ def render_field_block(field: Dict[str, str], uploads_key: str, default_mode: st
 def render_parte1():
     st.subheader("Parte 1 — Dados Base do Projeto/Promotor")
     with st.expander("Ajuda", expanded=False):
-        st.markdown("Preenche os dados base. Estes campos alimentam o **contexto** para geração na Parte 2.")
+        st.markdown("Estes campos alimentam o **contexto** para geração na Parte 2.")
     for f in FIELDS_PART1:
-        # Parte 1 não precisa de geração (mas podes ativar se quiseres)
         st.text_input(f["label"], key=f["key"], placeholder="…")
     st.markdown("---")
 
 def render_parte2():
     st.subheader("Parte 2 — Desenvolvimento do Dossier")
-    st.caption("Podes carregar documentos para dar contexto à IA (PDF/DOCX/XLSX).")
-    uploads = st.file_uploader("Carrega documentos de suporte", type=["pdf", "docx", "xlsx", "txt", "md"], accept_multiple_files=True, key="uploads_sec2")
-    # Guardar referência no session_state para os handlers
-    st.session_state["uploads_sec2"] = uploads
+    st.caption("Podes carregar documentos para dar contexto à IA (PDF/DOCX/XLSX/TXT/MD).")
+
+    # ⚠️ Instancia o uploader e **NÃO** escrevas em st.session_state["uploads_sec2"]
+    uploads = st.file_uploader(
+        "Carrega documentos de suporte",
+        type=["pdf", "docx", "xlsx", "txt", "md"],
+        accept_multiple_files=True,
+        key="uploads_sec2"
+    )
+    # Se precisares localmente:
+    _ = uploads or st.session_state.get("uploads_sec2", [])
 
     with st.expander("Preferências de geração", expanded=False):
-        st.markdown("- **Fonte de dados** por campo: escolher se a IA usa *Campos anteriores*, *Documentos* ou *Ambos*.")
-        st.markdown("- **Gerar com IA**: preenche o campo do zero.")
-        st.markdown("- **Expandir com IA**: acrescenta ao que já escreveste.")
+        st.markdown("- **Fonte de dados** por campo: *Campos anteriores*, *Documentos* ou *Ambos*.")
+        st.markdown("- **Gerar com IA** preenche o campo; **Expandir com IA** acrescenta ao texto existente.")
 
     for f in FIELDS_PART2:
         render_field_block(f, uploads_key="uploads_sec2")
@@ -299,10 +305,14 @@ def render_parte2():
 #  🚀 ENTRADA
 # =========================
 def main():
-    st.title("Formulário — Projeto de Investimento & Candidaturas")
+    st.set_page_config(page_title="IEFP — Formulário integrado", layout="wide")
+    st.title("IEFP — Formulário integrado (CBIZ_DEV)")
+    if not _get_api_key():
+        st.warning("⚠️ Define a tua **OPENAI_API_KEY** em `.streamlit/secrets.toml` ou como variável de ambiente para ativar os botões de IA.")
+
     render_parte1()
     render_parte2()
-    st.success("Pronto. Os botões de IA agora preenchem/expandem os campos e usam o contexto certo.")
+    st.success("Pronto. Parte 2 corrigida: já não há escrita em `st.session_state['uploads_sec2']`.")
 
 if __name__ == "__main__":
     main()
